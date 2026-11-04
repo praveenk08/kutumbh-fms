@@ -1,0 +1,54 @@
+name: Kutumbh FMS - CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    name: Build, Lint & Run Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    services:
+      mongodb:
+        image: mongo:6.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install Project Dependencies
+        run: npm install
+
+      - name: Verify Code Syntax & Formatting
+        run: npm run test:lint --if-present
+
+      - name: Execute Automated Test Suites
+        env:
+          NODE_ENV: test
+          PORT: 5001
+          MONGO_URI: mongodb://localhost:27017/kutumbh_fms_test
+          JWT_SECRET: ci_pipeline_super_secret_test_key_12345
+        run: npm test --if-present
