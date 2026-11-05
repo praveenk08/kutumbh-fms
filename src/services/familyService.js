@@ -75,6 +75,39 @@ static async getFamilyByToken(familyToken) {
       members
     };
   }
+
+  /**
+   * Updates verification status of a family unit
+   */
+  static async updateVerificationStatus(familyToken, { status, verifiedBy = null }) {
+    const validStatuses = ['PENDING', 'VERIFIED', 'FLAGGED_FOR_REVIEW', 'REJECTED'];
+    if (!validStatuses.includes(status)) {
+      const error = new Error(`Invalid status. Allowed values: ${validStatuses.join(', ')}`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const family = await Family.findOne({ familyToken });
+    if (!family) {
+      const error = new Error(`Family with token ${familyToken} not found.`);
+      error.statusCode = 404;
+      throw error;
+    }
+
+    family.verificationStatus = status;
+    family.verifiedBy = verifiedBy;
+    family.verifiedAt = status === 'VERIFIED' ? new Date() : null;
+
+    await family.save();
+
+    return {
+      familyToken: family.familyToken,
+      verificationStatus: family.verificationStatus,
+      verifiedAt: family.verifiedAt,
+      verifiedBy: family.verifiedBy,
+    };
+  }
+  
 }
 
 module.exports = FamilyService;

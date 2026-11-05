@@ -30,6 +30,26 @@ class FamilyController {
       next(error);
     }
   }
+
+  async updateVerificationStatus(req, res, next) {
+    try {
+      const { familyToken } = req.params;
+      const { status, verifiedBy } = req.body;
+
+      if (!status) {
+        return ApiResponse.error(res, 400, 'Status is required.');
+      }
+
+      const updatedFamily = await familyService.updateVerificationStatus(familyToken, {
+        status,
+        verifiedBy,
+      });
+
+      return ApiResponse.success(res, 200, 'Family verification status updated successfully.', updatedFamily);
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = new FamilyController();
