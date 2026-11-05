@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+const dns = require('dns');
+
+// Force Node.js runtime to use Google Public DNS for SRV queries
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 class DatabaseConnection {
   /**
