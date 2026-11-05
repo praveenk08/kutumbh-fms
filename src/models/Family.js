@@ -58,6 +58,10 @@ const familySchema = new mongoose.Schema(
         default: null,
       },
     },
+    totalMembers: {
+      type: Number,
+      default: 0,
+    },
     verificationStatus: {
       type: String,
       enum: ['PENDING', 'VERIFIED', 'FLAGGED_FOR_REVIEW', 'REJECTED'],

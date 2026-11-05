@@ -3,11 +3,13 @@ const MemberController = require('../controllers/memberController');
 
 const router = express.Router();
 
-// Route to add member under a specific family
+// POST /api/v1/families/:familyToken/members
 router.post('/families/:familyToken/members', MemberController.addMember);
 
-// Direct member actions by ID
+// PUT /api/v1/members/:memberId
 router.put('/members/:memberId', MemberController.updateMember);
+
+// DELETE /api/v1/members/:memberId
 router.delete('/members/:memberId', MemberController.removeMember);
 
 module.exports = router;

@@ -3,15 +3,7 @@ const Family = require('../models/Family');
 const mongoose = require('mongoose');
 
 class MemberService {
-  /**
-   * add a member to an existing family unit
-   * @param {Object} payload - The member data to be added
-   * @param {String} payload.familyToken - The token of the family to which the member belongs
-   * @param {Object} payload.memberData - The data of the member to be added
-   * @returns {Promise<Object>} - The newly created member document
-   * @throws {Error} - Throws an error if the family is not found or if there is a database error
-   */
- static async addMemberToFamily(familyToken, memberData) {
+  static async addMemberToFamily(familyToken, memberData) {
     const family = await Family.findOne({ familyToken });
     if (!family) {
       const error = new Error(`Family with token ${familyToken} not found.`);
@@ -19,18 +11,22 @@ class MemberService {
       throw error;
     }
 
+    const memberCount = await Member.countDocuments({ familyId: family._id });
+    const nextSequence = String(memberCount + 1).padStart(2, '0');
+    const memberReferenceId = `${family.familyToken}-M${nextSequence}`;
+
     const newMember = new Member({
       ...memberData,
       familyId: family._id,
+      memberReferenceId,
     });
 
     const savedMember = await newMember.save();
+    await Family.findByIdAndUpdate(family._id, { $inc: { totalMembers: 1 } });
+
     return savedMember;
   }
 
-  /**
-   * Updates an existing member profile
-   */
   static async updateMember(memberId, updatePayload) {
     if (!mongoose.Types.ObjectId.isValid(memberId)) {
       const error = new Error('Invalid Member ID format.');
@@ -38,7 +34,6 @@ class MemberService {
       throw error;
     }
 
-    // Prohibit changing family association directly via update
     delete updatePayload.familyId;
 
     const updatedMember = await Member.findByIdAndUpdate(
@@ -56,9 +51,6 @@ class MemberService {
     return updatedMember;
   }
 
-  /**
-   * Deactivates a member (Soft delete for census audits)
-   */
   static async removeMember(memberId, reason = 'Migrated') {
     if (!mongoose.Types.ObjectId.isValid(memberId)) {
       const error = new Error('Invalid Member ID format.');

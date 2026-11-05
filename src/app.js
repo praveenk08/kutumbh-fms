@@ -3,19 +3,15 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const familyRoutes = require('./routes/familyRoutes');
-const memberRoutes = require('./routes/memberRoutes'); // 
+const memberRoutes = require('./routes/memberRoutes');
 const errorHandler = require('./middlewares/errorMiddleware');
 const ApiResponse = require('./utils/apiResponse');
 
 const app = express();
 
-// Security HTTP headers
 app.use(helmet());
-
-// Cross-Origin Resource Sharing
 app.use(cors());
 
-// Rate Limiting: 100 requests per 15 minutes per IP
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -27,26 +23,21 @@ const apiLimiter = rateLimit({
 });
 app.use('/api', apiLimiter);
 
-// Body Parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Health Check Endpoint
 app.get('/health', (req, res) => {
   return ApiResponse.success(res, 200, 'Kutumbh FMS Core API is healthy and operational.');
 });
 
-// Mount Domain Routes
-app.use('/api/v1/families', familyRoutes);
+// Domain Routes - Dono /api/v1 par clean mount hain
 app.use('/api/v1', familyRoutes);
-app.use('/api/v1', memberRoutes); //
+app.use('/api/v1', memberRoutes);
 
-// Catch-all 404 handler for undefined endpoints
 app.use((req, res) => {
   return ApiResponse.error(res, 404, `Endpoint not found: ${req.method} ${req.originalUrl}`);
 });
 
-// Central Global Error Handler Middleware
 app.use(errorHandler);
 
 module.exports = app;

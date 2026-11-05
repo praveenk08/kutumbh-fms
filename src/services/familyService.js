@@ -1,74 +1,80 @@
 const mongoose = require('mongoose');
 const Family = require('../models/Family');
 const Member = require('../models/Member');
-const { generateFamilyToken, generateMemberId } = require('../utils/tokenGenerator');
+const { generateFamilyToken } = require('../utils/tokenGenerator');
 
 class FamilyService {
-  async registerFamilyUnit(payload) {
-    const { familyData, membersData } = payload;
-
-    if (!membersData || !Array.isArray(membersData) || membersData.length === 0) {
-      const error = new Error('A family unit must contain at least one registered member.');
-      error.statusCode = 400;
-      throw error;
-    }
-
+  /**
+   * Registers a new family unit and its initial members atomically using MongoDB transactions
+   */
+  static async registerFamilyUnit({ familyData, membersData }) {
     const session = await mongoose.startSession();
+    session.startTransaction();
 
     try {
-      let createdFamily = null;
-      let createdMembers = [];
+      // 1. Unique family token generate karna
+      const familyToken = await generateFamilyToken();
 
-      await session.withTransaction(async () => {
-        const familyToken = generateFamilyToken('BAL', 6);
-
-        const newFamily = new Family({
-          ...familyData,
-          familyToken,
-        });
-
-        const savedFamilyArray = await Family.create([newFamily], { session });
-        createdFamily = savedFamilyArray[0];
-
-        const membersToInsert = membersData.map((member, index) => ({
-          ...member,
-          familyId: createdFamily._id,
-          memberReferenceId: generateMemberId(familyToken, index + 1),
-        }));
-
-        createdMembers = await Member.insertMany(membersToInsert, { session });
+      // 2. Family unit create karna
+      const newFamily = new Family({
+        ...familyData,
+        familyToken,
+        totalMembers: membersData.length
       });
 
+      const savedFamily = await newFamily.save({ session });
+
+      // 3. Sabhi initial members ko familyId aur token sequence ke sath map karna
+      const preparedMembers = membersData.map((member, index) => {
+        const sequence = String(index + 1).padStart(2, '0');
+        return {
+          ...member,
+          familyId: savedFamily._id,
+          memberReferenceId: `${familyToken}-M${sequence}`
+        };
+      });
+
+      const savedMembers = await Member.insertMany(preparedMembers, { session });
+
+      // 4. Transaction commit karna
+      await session.commitTransaction();
+      session.endSession();
+
       return {
-        success: true,
-        familyToken: createdFamily.familyToken,
-        familyId: createdFamily._id,
-        headName: createdFamily.headName,
-        totalMembersRegistered: createdMembers.length,
-        members: createdMembers,
+        familyToken: savedFamily.familyToken,
+        familyId: savedFamily._id,
+        headName: savedFamily.headName,
+        totalMembersRegistered: savedMembers.length,
+        members: savedMembers
       };
-    } finally {
-      await session.endSession();
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
     }
   }
 
-  async getFamilyByToken(familyToken) {
-    const family = await Family.findOne({ familyToken: familyToken.toUpperCase() })
-      .populate({
-        path: 'members',
-        select: '-__v',
-        options: { sort: { createdAt: 1 } },
-      })
-      .lean();
-
+  /**
+   * Fetches full family details along with all active members
+   */
+static async getFamilyByToken(familyToken) {
+    const family = await Family.findOne({ familyToken });
     if (!family) {
-      const error = new Error(`Family record with token ${familyToken} was not found.`);
+      const error = new Error(`Family with token ${familyToken} not found.`);
       error.statusCode = 404;
       throw error;
     }
 
-    return family;
+    const members = await Member.find({ 
+      familyId: family._id, 
+      isActive: { $ne: false } 
+    });
+
+    return {
+      family,
+      members
+    };
   }
 }
 
-module.exports = new FamilyService();
+module.exports = FamilyService;

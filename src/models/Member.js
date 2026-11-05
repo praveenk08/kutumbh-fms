@@ -49,6 +49,17 @@ const memberSchema = new mongoose.Schema(
     individualAadhaarStatus: {
       isEnrolled: { type: Boolean, default: true },
     },
+    // Soft delete aur audit tracking ke liye zaroori fields:
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    remarks: {
+      type: String,
+      default: null,
+      trim: true,
+    },
   },
   {
     timestamps: true,
