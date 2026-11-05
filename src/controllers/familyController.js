@@ -50,6 +50,31 @@ class FamilyController {
       next(error);
     }
   }
+  async searchFamilies(req, res, next) {
+    try {
+      const {
+        village,
+        rationCardCategory,
+        verificationStatus,
+        search,
+        page,
+        limit,
+      } = req.query;
+
+      const result = await familyService.searchFamilies({
+        village,
+        rationCardCategory,
+        verificationStatus,
+        search,
+        page,
+        limit,
+      });
+
+      return ApiResponse.success(res, 200, 'Families retrieved successfully.', result);
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = new FamilyController();

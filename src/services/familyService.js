@@ -107,7 +107,62 @@ static async getFamilyByToken(familyToken) {
       verifiedBy: family.verifiedBy,
     };
   }
-  
+
+  /**
+   * Search and filter families with pagination
+   */
+  static async searchFamilies({
+    village,
+    rationCardCategory,
+    verificationStatus,
+    search,
+    page = 1,
+    limit = 10,
+  }) {
+    const query = {};
+
+    if (village) {
+      query['habitation.village'] = new RegExp(village, 'i');
+    }
+
+    if (rationCardCategory) {
+      query['economicProfile.rationCardCategory'] = rationCardCategory;
+    }
+
+    if (verificationStatus) {
+      query.verificationStatus = verificationStatus;
+    }
+
+    if (search) {
+      query.$or = [
+        { headName: new RegExp(search, 'i') },
+        { familyToken: new RegExp(search, 'i') },
+      ];
+    }
+
+    const pageNumber = Math.max(1, parseInt(page, 10) || 1);
+    const limitNumber = Math.max(1, Math.min(100, parseInt(limit, 10) || 10));
+    const skip = (pageNumber - 1) * limitNumber;
+
+    const [families, total] = await Promise.all([
+      Family.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNumber)
+        .lean(),
+      Family.countDocuments(query),
+    ]);
+
+    return {
+      families,
+      pagination: {
+        totalRecords: total,
+        currentPage: pageNumber,
+        totalPages: Math.ceil(total / limitNumber),
+        limit: limitNumber,
+      },
+    };
+  }
 }
 
 module.exports = FamilyService;
