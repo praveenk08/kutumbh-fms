@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const familyRoutes = require('./routes/familyRoutes');
+const memberRoutes = require('./routes/memberRoutes'); // 
 const errorHandler = require('./middlewares/errorMiddleware');
 const ApiResponse = require('./utils/apiResponse');
 
@@ -37,6 +38,8 @@ app.get('/health', (req, res) => {
 
 // Mount Domain Routes
 app.use('/api/v1/families', familyRoutes);
+app.use('/api/v1', familyRoutes);
+app.use('/api/v1', memberRoutes); //
 
 // Catch-all 404 handler for undefined endpoints
 app.use((req, res) => {
