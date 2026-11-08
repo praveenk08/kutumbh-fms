@@ -1,14 +1,14 @@
 require('dotenv').config();
 const http = require('http');
 const app = require('./app');
-const DatabaseConnection = require('./config/db');
+const { testMySQLConnection, pool } = require('./config/mysql');
 
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
-    // 1. Connect to Database
-    await DatabaseConnection.connect();
+    // 1. Connect to MySQL Database
+    await testMySQLConnection();
 
     // 2. Initialize HTTP Server
     const server = http.createServer(app);
@@ -17,11 +17,14 @@ const startServer = async () => {
       console.log(`[Server] Kutumbh FMS Core running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode.`);
     });
 
-    // Graceful Shutdown on termination signals
+    // Graceful Shutdown
     const handleShutdown = async (signal) => {
-      console.log(`[Server] Signal ${signal} received. Closing HTTP server and database pool...`);
+      console.log(`[Server] Signal ${signal} received. Closing HTTP server and MySQL pool...`);
       server.close(async () => {
-        await DatabaseConnection.disconnect(signal);
+        if (pool) {
+          await pool.end();
+          console.log('[Database] MySQL connection pool closed.');
+        }
         process.exit(0);
       });
     };
