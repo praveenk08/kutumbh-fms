@@ -64,41 +64,148 @@ class MemberService {
     });
   }
 
-  /**
-   * Soft-delete / deactivate member using managed transaction helper.
+/**
+   * Unified Member Removal & Head Succession Engine
+   * Handles soft deletion, audit flags, and atomic head succession.
    */
-  static async softDeleteMember(identifier, remarks = 'Removed') {
+  static async softDeleteMember(memberIdentifier, options = {}) {
+    const reason = typeof options === 'string' ? options : (options.reason || 'Removed');
+    const lifeEventFlag = options.lifeEventFlag || 'निष्क्रिय';
+    const newHeadMemberRefId = options.newHeadMemberRefId || null;
+    const deactivateEntireFamily = Boolean(options.deactivateEntireFamily);
+
     return withTransaction(async (connection) => {
-      const isNumeric = /^\d+$/.test(identifier);
-      const whereCondition = isNumeric ? 'id = ?' : 'member_ref_id = ?';
+      // 1. Target member aur uski family fetch karein
+      const isNumeric = /^\d+$/.test(memberIdentifier);
+      const whereCond = isNumeric ? 'm.id = ?' : 'm.member_ref_id = ?';
 
-      const [members] = await connection.execute(
-        `SELECT id, family_id, member_ref_id, is_active FROM members WHERE ${whereCondition} LIMIT 1`,
-        [identifier]
+      const [memberRows] = await connection.execute(
+        `SELECT m.id, m.family_id, m.family_token, m.full_name, m.relationship_with_head, m.is_active, f.head_name
+         FROM members m
+         JOIN families f ON f.id = m.family_id
+         WHERE ${whereCond} LIMIT 1`,
+        [memberIdentifier]
       );
 
-      if (members.length === 0) {
-        throw new Error(`Member with identifier ${identifier} not found`);
+      if (memberRows.length === 0) {
+        throw new Error(`Member ${memberIdentifier} not found`);
       }
 
-      const member = members[0];
+      const member = memberRows[0];
+      const familyId = member.family_id;
+      const familyToken = member.family_token;
 
-      await connection.execute(
-        `UPDATE members SET is_active = FALSE, remarks = ? WHERE id = ?`,
-        [remarks, member.id]
-      );
+      // 2. Check: Kya yeh member Mukhiya (Head) hai?
+      const isHead = member.relationship_with_head === 'स्वयं' || member.full_name === member.head_name;
 
-      if (member.is_active) {
+      // CASE A: Normal Member (Mukhiya nahi hai)
+      if (!isHead) {
         await connection.execute(
-          `UPDATE families SET total_members = GREATEST(total_members - 1, 0) WHERE id = ?`,
-          [member.family_id]
+          `UPDATE members 
+           SET is_active = FALSE, life_event_flag = ?, remarks = ? 
+           WHERE id = ?`,
+          [lifeEventFlag, reason, member.id]
         );
+
+        if (member.is_active) {
+          await connection.execute(
+            `UPDATE families SET total_members = GREATEST(total_members - 1, 0) WHERE id = ?`,
+            [familyId]
+          );
+        }
+
+        return {
+          action: 'MEMBER_DEACTIVATED',
+          memberRefId: member.member_ref_id || memberIdentifier,
+          fullName: member.full_name,
+          lifeEventFlag,
+          reason,
+        };
       }
+
+      // CASE B: Mukhiya hai aur Poora Parivar Deactivate karna hai
+      if (deactivateEntireFamily) {
+        await connection.execute(
+          `UPDATE families 
+           SET verification_status = 'REJECTED', 
+               updated_by = CONCAT('Deactivated Family: ', ?) 
+           WHERE id = ?`,
+          [reason, familyId]
+        );
+
+        await connection.execute(
+          `UPDATE members 
+           SET is_active = FALSE, life_event_flag = ?, remarks = ? 
+           WHERE family_id = ?`,
+          [lifeEventFlag, reason, familyId]
+        );
+
+        return {
+          action: 'ENTIRE_FAMILY_DEACTIVATED',
+          familyToken,
+          previousHead: member.full_name,
+          reason,
+        };
+      }
+
+      // CASE C: Mukhiya hai lekin Naya Head provide nahi kiya
+      if (!newHeadMemberRefId) {
+        const error = new Error('CANNOT_DELETE_HEAD_WITHOUT_SUCCESSOR');
+        error.statusCode = 400;
+        error.details = 'मुखिया को हटाने के लिए newHeadMemberRefId प्रदान करें या deactivateEntireFamily को true सेट करें।';
+        throw error;
+      }
+
+      // CASE D: Mukhiya Succession (Naye sadasya ko Mukhiya banana)
+      const isNewHeadNumeric = /^\d+$/.test(newHeadMemberRefId);
+      const newHeadWhere = isNewHeadNumeric ? 'id = ?' : 'member_ref_id = ?';
+
+      const [successorRows] = await connection.execute(
+        `SELECT id, member_ref_id, full_name, is_active 
+         FROM members 
+         WHERE family_id = ? AND ${newHeadWhere} AND is_active = TRUE AND id != ? LIMIT 1`,
+        [familyId, newHeadMemberRefId, member.id]
+      );
+
+      if (successorRows.length === 0) {
+        const error = new Error(`New proposed head (${newHeadMemberRefId}) is not an active member of this family.`);
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const successor = successorRows[0];
+
+      // Purane mukhiya ko deactivate karein
+      await connection.execute(
+        `UPDATE members 
+         SET is_active = FALSE, life_event_flag = ?, remarks = ? 
+         WHERE id = ?`,
+        [lifeEventFlag, reason, member.id]
+      );
+
+      // Naye sadasya ko 'स्वयं' assign karein
+      await connection.execute(
+        `UPDATE members SET relationship_with_head = 'स्वयं' WHERE id = ?`,
+        [successor.id]
+      );
+
+      // Families table me head_name aur total_members update karein
+      await connection.execute(
+        `UPDATE families 
+         SET head_name = ?, 
+             total_members = GREATEST(total_members - 1, 1),
+             updated_by = CONCAT('Head transferred to ', ?)
+         WHERE id = ?`,
+        [successor.full_name, successor.full_name, familyId]
+      );
 
       return {
-        memberRefId: member.member_ref_id,
-        status: 'DEACTIVATED',
-        remarks,
+        action: 'HEAD_SUCCESSION_COMPLETED',
+        familyToken,
+        previousHead: member.full_name,
+        newHead: successor.full_name,
+        newHeadRefId: successor.member_ref_id,
+        reason,
       };
     });
   }

@@ -63,9 +63,18 @@ const verifyStatusSchema = z.object({
   verifiedBy: z.string().optional().default('ADMIN'),
 });
 
+// Member deletion & succession schema
+const removeMemberSchema = z.object({
+  reason: z.string().min(2, 'Deactivation reason is required').optional().default('Administrative removal'),
+  lifeEventFlag: z.enum(['निष्क्रिय', 'मृत', 'विवाह/ससुराल', 'प्रवासी', 'हटाया गया']).optional().default('निष्क्रिय'),
+  newHeadMemberRefId: z.string().optional().nullable(),
+  deactivateEntireFamily: z.boolean().optional().default(false),
+});
+
 module.exports = {
   memberSchema,
   updateMemberSchema,
   registerFamilySchema,
   verifyStatusSchema,
+  removeMemberSchema,
 };

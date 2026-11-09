@@ -47,16 +47,32 @@ class MemberController {
     return ApiResponse.success(res, 200, 'Member updated successfully', updated);
   });
 
-  /**
+/**
    * Handle DELETE /api/v1/members/:memberId
+   * Also handles PATCH /api/v1/members/:memberRefId/deactivate
    */
   removeMember = asyncHandler(async (req, res) => {
-    const { memberId } = req.params;
-    const { reason, remarks } = req.body;
+    const memberId = req.params.memberId || req.params.memberRefId;
+    const { reason, lifeEventFlag, newHeadMemberRefId, deactivateEntireFamily, remarks } = req.body || {};
 
-    const result = await memberService.softDeleteMember(memberId, reason || remarks || 'Removed');
-    return ApiResponse.success(res, 200, 'Member deactivated successfully.', result);
+    try {
+      const result = await memberService.softDeleteMember(memberId, {
+        reason: reason || remarks || 'Administrative removal',
+        lifeEventFlag,
+        newHeadMemberRefId,
+        deactivateEntireFamily,
+      });
+
+      return ApiResponse.success(res, 200, 'Member action processed successfully.', result);
+    } catch (err) {
+      if (err.statusCode === 400 || err.message === 'CANNOT_DELETE_HEAD_WITHOUT_SUCCESSOR') {
+        return ApiResponse.error(res, 400, err.details || err.message);
+      }
+      throw err;
+    }
   });
+
+  softDeleteMember = this.removeMember;
 }
 
 module.exports = new MemberController();
