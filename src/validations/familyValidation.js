@@ -5,7 +5,7 @@
 
 const { z } = require('zod');
 
-// Schema for individual member payload
+// Schema for individual member creation payload
 const memberSchema = z.object({
   fullName: z.string().trim().min(2, 'Full name must have at least 2 characters'),
   gender: z.enum(['MALE', 'FEMALE', 'OTHER'], {
@@ -13,6 +13,19 @@ const memberSchema = z.object({
   }),
   dob: z.string().optional().nullable(),
   relationshipWithHead: z.string().optional().default('MEMBER'),
+  maritalStatus: z.string().optional().nullable(),
+  educationalQualification: z.string().optional().nullable(),
+  education: z.string().optional().nullable(),
+  primaryOccupation: z.string().optional().nullable(),
+  occupation: z.string().optional().nullable(),
+});
+
+// Schema for updating member (fields optional hoti hain)
+const updateMemberSchema = z.object({
+  fullName: z.string().trim().min(2, 'Full name must have at least 2 characters').optional(),
+  gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
+  dob: z.string().optional().nullable(),
+  relationshipWithHead: z.string().optional(),
   maritalStatus: z.string().optional().nullable(),
   educationalQualification: z.string().optional().nullable(),
   education: z.string().optional().nullable(),
@@ -51,7 +64,8 @@ const verifyStatusSchema = z.object({
 });
 
 module.exports = {
-  registerFamilySchema,
   memberSchema,
+  updateMemberSchema,
+  registerFamilySchema,
   verifyStatusSchema,
 };
