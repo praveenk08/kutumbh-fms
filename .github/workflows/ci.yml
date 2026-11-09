@@ -4,10 +4,13 @@ on:
   push:
     branches:
       - main
+      - master
       - develop
+      - 'feature/*'
   pull_request:
     branches:
       - main
+      - master
 
 jobs:
   build-and-test:
@@ -19,15 +22,16 @@ jobs:
         node-version: [18.x, 20.x]
 
     services:
-      mongodb:
-        image: mongo:6.0
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: kutumbh_fms
+          MYSQL_USER: fms_user
+          MYSQL_PASSWORD: fmspassword123
         ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=5
 
     steps:
       - name: Checkout Source Code
@@ -45,10 +49,18 @@ jobs:
       - name: Verify Code Syntax & Formatting
         run: npm run test:lint --if-present
 
+      - name: Seed Database Schema
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -u fms_user -pfmspassword123 kutumbh_fms < src/database/init_mysql.sql
+
       - name: Execute Automated Test Suites
         env:
           NODE_ENV: test
           PORT: 5001
-          MONGO_URI: mongodb://localhost:27017/kutumbh_fms_test
-          JWT_SECRET: ci_pipeline_super_secret_test_key_12345
-        run: npm test --if-present
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: fms_user
+          DB_PASSWORD: fmspassword123
+          DB_NAME: kutumbh_fms
+          DISTRICT_PREFIX: BAL
+        run: npm test
