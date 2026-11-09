@@ -51,7 +51,9 @@ jobs:
 
       - name: Seed Database Schema
         run: |
-          mysql -h 127.0.0.1 -P 3306 -u fms_user -pfmspassword123 kutumbh_fms < src/database/init_mysql.sql
+          SCHEMA_FILE=$(find . -name "init_mysql.sql" | head -n 1)
+          echo "Found schema file at: $SCHEMA_FILE"
+          mysql -h 127.0.0.1 -P 3306 -u fms_user -pfmspassword123 kutumbh_fms < "$SCHEMA_FILE"
 
       - name: Execute Automated Test Suites
         env:
