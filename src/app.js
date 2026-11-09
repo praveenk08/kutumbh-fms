@@ -15,6 +15,7 @@ const swaggerSpec = require('./config/swagger');
 // Route Handlers
 const familyRoutes = require('./routes/familyRoutes');
 const memberRoutes = require('./routes/memberRoutes');
+const censusRoutes = require('./routes/censusRoutes');
 
 // Utilities & Middlewares
 const errorHandler = require('./middlewares/errorMiddleware');
@@ -64,6 +65,7 @@ app.get('/health', (req, res) => {
 // 8. Domain-Specific API Routes
 app.use('/api/v1/families', familyRoutes);
 app.use('/api/v1/members', memberRoutes);
+app.use('/api/v1/census', censusRoutes);
 
 // 9. Root Route -> Admin Console
 app.get('/', (req, res) => {
