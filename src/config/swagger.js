@@ -1,32 +1,11 @@
 /**
  * @file swagger.js
- * @description OpenAPI 3.0 / Swagger configuration for Kutumbh FMS
+ * @description Loads centralized OpenAPI spec from YAML for Swagger UI
  */
 
-const swaggerJsdoc = require('swagger-jsdoc');
+const path = require('path');
+const YAML = require('yamljs');
 
-const options = {
-  definition: {
-    openapi: '3.0.0',
-    info: {
-      title: 'Kutumbh FMS API',
-      version: '2.0.0',
-      description: 'Gram Panchayat Digital Family Management System & Census Platform API Documentation',
-      contact: {
-        name: 'Praveen Kumar',
-        email: 'pk46066@gmail.com',
-      },
-    },
-    servers: [
-      {
-        url: 'http://localhost:5000',
-        description: 'Local Development Server',
-      },
-    ],
-  },
-  apis: ['./src/routes/*.js'], // Saare route files se JSDoc comments parse karega
-};
+const swaggerDocument = YAML.load(path.join(__dirname, '../../docs/openapi.yaml'));
 
-const swaggerSpec = swaggerJsdoc(options);
-
-module.exports = swaggerSpec;
+module.exports = swaggerDocument;

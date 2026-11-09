@@ -1,212 +1,192 @@
 /**
  * @file familyService.js
- * @description Kutumbh FMS - MySQL Service Layer for Family Unit Management
- * Handles relational database queries and transactions for families and their members.
+ * @module Services/FamilyService
+ * @description Kutumbh FMS - Family business logic powered by withTransaction and queryHelper.
  */
 
 const { pool } = require('../config/mysql');
-const { generateFamilyToken } = require('../utils/tokenGenerator');
+const { withTransaction } = require('../lib/transactionRunner');
+const { getPagination, formatPaginationResult } = require('../utils/queryHelper');
+const { generateFamilyToken, generateMemberRefId } = require('../utils/tokenGenerator');
 
 class FamilyService {
   /**
-   * Register a new Family Unit (Family record + Initial Members) inside an ACID Transaction.
-   * If any step fails, the entire transaction rolls back to prevent orphan records.
-   * 
-   * @param {Object} param0
-   * @param {Object} param0.familyData - Habitation, contact, and economic details of the family.
-   * @param {Array} param0.membersData - List of individual member profiles belonging to this family.
-   * @returns {Promise<Object>} Created family summary and token.
+   * Register a new family unit along with members inside an atomic transaction.
+   *
+   * @async
+   * @param {Object} payload - Validated registration payload.
+   * @returns {Promise<Object>} Created family record with token.
    */
-  static async registerFamilyUnit({ familyData, membersData }) {
-    // Connection pool se dedicated connection lein transaction ke liye
-    const connection = await pool.getConnection();
-    try {
-      // 1. Transaction shuru karein
-      await connection.beginTransaction();
+  static async registerFamily(payload) {
+    const { familyData, membersData } = payload;
 
-      // District prefix ke saath unique Family Token banayein (e.g. BAL-2026-A1B2C3)
-      const districtPrefix = process.env.DISTRICT_PREFIX || 'BAL';
-      const familyToken = generateFamilyToken(districtPrefix);
+    return withTransaction(async (connection) => {
+      // 1. Unique Family Token generate karein
+      const familyToken = await generateFamilyToken();
 
-      const headName = familyData.headName;
-      const guardianName = familyData.guardianName;
-      const contactNumber = familyData.contactNumber || null;
-      const state = familyData.habitation?.state || 'Uttar Pradesh';
-      const district = familyData.habitation?.district || 'Ballia';
-      const block = familyData.habitation?.block || 'Dubahar';
-      const village = familyData.habitation?.village;
-      const habitationName = familyData.habitation?.habitationName || null;
-      const rationCardCategory = familyData.economicProfile?.rationCardCategory || 'NONE';
-      const annualIncome = familyData.economicProfile?.annualIncome || 0.00;
-      const totalMembers = Array.isArray(membersData) && membersData.length > 0 ? membersData.length : 1;
-
-      // 2. 'families' table mein record insert karein
+      // 2. Family parent record insert karein
       const [familyResult] = await connection.execute(
         `INSERT INTO families 
-        (family_token, head_name, guardian_name, contact_number, state, district, block, village, habitation_name, ration_card_category, annual_income, total_members, verification_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
+        (family_token, head_name, guardian_name, contact_number, state, district, block, village, habitation_name, tola_mohalla, ration_card_category, annual_income, total_members, verification_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
         [
           familyToken,
-          headName,
-          guardianName,
-          contactNumber,
-          state,
-          district,
-          block,
-          village,
-          habitationName,
-          rationCardCategory,
-          annualIncome,
-          totalMembers,
+          familyData.headName,
+          familyData.guardianName,
+          familyData.contactNumber || null,
+          familyData.habitation?.state || 'Uttar Pradesh',
+          familyData.habitation?.district || 'Ballia',
+          familyData.habitation?.block || 'Dubahar',
+          familyData.habitation?.village,
+          familyData.habitation?.habitationName || null,
+          familyData.habitation?.tolaMohalla || null,
+          familyData.economicProfile?.rationCardCategory || 'NONE',
+          familyData.economicProfile?.annualIncome || 0,
+          membersData.length,
         ]
       );
 
       const familyId = familyResult.insertId;
 
-      // 3. 'members' table mein sabhi parivar sadasyon ko loop karke insert karein
-      if (Array.isArray(membersData) && membersData.length > 0) {
-        for (let i = 0; i < membersData.length; i++) {
-          const m = membersData[i];
-          const seq = String(i + 1).padStart(2, '0');
-          const memberRefId = `${familyToken}-M${seq}`; // e.g. BAL-2026-XXXXXX-M01
+      // 3. Sabhi family members insert karein
+      for (let index = 0; index < membersData.length; index++) {
+        const member = membersData[index];
+        const memberRefId = generateMemberRefId(familyToken, index + 1);
 
-          await connection.execute(
-            `INSERT INTO members
-            (family_id, family_token, member_ref_id, full_name, gender, dob, relationship_with_head, marital_status, education, occupation, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
-            [
-              familyId,
-              familyToken,
-              memberRefId,
-              m.fullName || m.full_name,
-              m.gender,
-              m.dob || null,
-              m.relationshipWithHead || m.relationship_with_head || 'MEMBER',
-              m.maritalStatus || m.marital_status || null,
-              m.education || null,
-              m.occupation || null,
-            ]
-          );
-        }
+        await connection.execute(
+          `INSERT INTO members 
+          (family_id, family_token, member_ref_id, full_name, gender, dob, relationship_with_head, marital_status, education, occupation, is_active)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
+          [
+            familyId,
+            familyToken,
+            memberRefId,
+            member.fullName,
+            member.gender,
+            member.dob || null,
+            member.relationshipWithHead || 'MEMBER',
+            member.maritalStatus || null,
+            member.education || member.educationalQualification || null,
+            member.occupation || member.primaryOccupation || null,
+          ]
+        );
       }
 
-      // 4. Sabhi queries successful hone par commit karein
-      await connection.commit();
-
       return {
+        id: familyId,
         familyToken,
-        headName,
-        village,
-        totalMembers,
+        headName: familyData.headName,
+        totalMembers: membersData.length,
         verificationStatus: 'PENDING',
       };
-    } catch (error) {
-      // Kisi bhi query me error aane par rollback karein
-      await connection.rollback();
-      throw error;
-    } finally {
-      // Connection ko wapas pool mein release karein
-      connection.release();
-    }
+    });
   }
 
   /**
    * Search and filter families with pagination.
-   * 
-   * @param {Object} filters - Query params like village, rationCardCategory, search string, etc.
-   * @returns {Promise<Object>} Paginated records and metadata.
+   *
+   * @async
+   * @param {Object} filters - Query parameters (search, village, status, page, limit).
+   * @returns {Promise<Object>} Paginated records and meta information.
    */
-  static async searchFamilies({ village, rationCardCategory, verificationStatus, search, page = 1, limit = 10 }) {
+  static async searchFamilies(filters) {
+    const { pageNum, limitNum, offset } = getPagination(filters.page, filters.limit);
+
     const conditions = [];
     const params = [];
 
-    // Village filter
-    if (village) {
-      conditions.push('village LIKE ?');
-      params.push(`%${village}%`);
+    if (filters.search) {
+      conditions.push('(family_token LIKE ? OR head_name LIKE ?)');
+      params.push(`%${filters.search}%`, `%${filters.search}%`);
     }
 
-    // Ration Card category filter (AAY, BPL, APL, NONE)
-    if (rationCardCategory) {
+    if (filters.village) {
+      conditions.push('village = ?');
+      params.push(filters.village);
+    }
+
+    if (filters.rationCardCategory) {
       conditions.push('ration_card_category = ?');
-      params.push(rationCardCategory);
+      params.push(filters.rationCardCategory);
     }
 
-    // Verification Status (PENDING, VERIFIED, REJECTED)
-    if (verificationStatus) {
+    if (filters.verificationStatus) {
       conditions.push('verification_status = ?');
-      params.push(verificationStatus);
-    }
-
-    // Fulltext search on Head Name or Family Token
-    if (search) {
-      conditions.push('(head_name LIKE ? OR family_token LIKE ?)');
-      params.push(`%${search}%`, `%${search}%`);
+      params.push(filters.verificationStatus);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 10));
-    const offset = (pageNum - 1) * limitNum;
 
-    // Filter ke hisaab se total count nikalein
-    const [countRows] = await pool.query(`SELECT COUNT(*) as total FROM families ${whereClause}`, params);
-    const total = countRows[0].total;
+    // Total count fetch karein
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS total FROM families ${whereClause}`,
+      params
+    );
+    const totalRecords = countRows[0].total;
 
-    // Paginated rows fetch karein
-    const [families] = await pool.query(
-      `SELECT * FROM families ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    // Paginated records fetch karein
+    const [rows] = await pool.query(
+      `SELECT * FROM families ${whereClause} ORDER BY id DESC LIMIT ? OFFSET ?`,
       [...params, limitNum, offset]
     );
 
-    return {
-      families,
-      pagination: {
-        totalRecords: total,
-        currentPage: pageNum,
-        totalPages: Math.ceil(total / limitNum),
-        limit: limitNum,
-      },
-    };
+    return formatPaginationResult(rows, totalRecords, pageNum, limitNum);
   }
 
   /**
-   * Retrieve full family details including all active members by Family Token.
-   * 
-   * @param {string} familyToken - The unique family identifier.
-   * @returns {Promise<Object|null>}
+   * Retrieve a family and all associated active members by Family Token.
+   *
+   * @async
+   * @param {string} familyToken - Unique family registration token.
+   * @returns {Promise<Object|null>} Family entity with nested members.
    */
   static async getFamilyByToken(familyToken) {
-    const [familyRows] = await pool.query('SELECT * FROM families WHERE family_token = ? LIMIT 1', [familyToken]);
-    if (familyRows.length === 0) return null;
+    const [families] = await pool.execute(
+      'SELECT * FROM families WHERE family_token = ? LIMIT 1',
+      [familyToken]
+    );
 
-    // Active members ko fetch karein
-    const [memberRows] = await pool.query(
+    if (families.length === 0) return null;
+
+    const family = families[0];
+
+    const [members] = await pool.execute(
       'SELECT * FROM members WHERE family_token = ? AND is_active = TRUE ORDER BY id ASC',
       [familyToken]
     );
 
     return {
-      ...familyRows[0],
-      members: memberRows,
+      ...family,
+      members,
     };
   }
 
   /**
-   * Update the administrative verification status of a family.
-   * 
+   * Update administrative verification status.
+   *
+   * @async
    * @param {string} familyToken
-   * @param {Object} statusData - { status, verifiedBy }
-   * @returns {Promise<Object|null>}
+   * @param {string} status - PENDING | VERIFIED | REJECTED
+   * @param {string} verifiedBy
+   * @returns {Promise<Object>} Updated status result.
    */
-  static async updateVerificationStatus(familyToken, { status, verifiedBy }) {
-    await pool.query(
-      'UPDATE families SET verification_status = ?, verified_by = ?, verified_at = NOW() WHERE family_token = ?',
-      [status, verifiedBy || 'ADMIN', familyToken]
+  static async updateVerificationStatus(familyToken, status, verifiedBy = 'ADMIN') {
+    const [result] = await pool.execute(
+      `UPDATE families 
+       SET verification_status = ?, verified_by = ?, verified_at = CURRENT_TIMESTAMP 
+       WHERE family_token = ?`,
+      [status, verifiedBy, familyToken]
     );
 
-    const [updated] = await pool.query('SELECT * FROM families WHERE family_token = ?', [familyToken]);
-    return updated[0] || null;
+    if (result.affectedRows === 0) {
+      throw new Error(`Family with token ${familyToken} not found`);
+    }
+
+    return {
+      familyToken,
+      verificationStatus: status,
+      verifiedBy,
+    };
   }
 }
 
